@@ -1,0 +1,67 @@
+# Implementation Plan: System Support Tickets Deletion Feature
+
+This plan outlines the steps required to implement the support ticket deletion mechanism for both Admin and Users.
+
+## Context and Goal
+The user requested the ability for both the Admin and the User to delete support tickets from their respective records. The key constraints are:
+1. If a **User** deletes a ticket, it should be removed from their local dashboard, but **NOT** from the Admin's dashboard unless the Admin also deletes it.
+2. If a **User** deletes a ticket, the Admin should see a clear visual indicator that the user has deleted it, and the Admin should be blocked from replying to that ticket.
+3. If the **Admin** deletes a ticket, it should be removed from the Admin's dashboard entirely.
+
+## User Review Required
+
+> [!IMPORTANT]
+> The database schema needs to be updated with Entity Framework Core mapping to add boolean flags (`IsDeletedByUser`, `IsDeletedByAdmin`). Running a database migration will be required as part of the execution.
+
+## Proposed Changes
+
+### Database & Models
+
+#### [MODIFY] `R3AIA\Models\SupportTicket.cs`
+- Add `public bool IsDeletedByUser { get; set; } = false;`
+- Add `public bool IsDeletedByAdmin { get; set; } = false;`
+
+#### [NEW] Migration files
+- A new Entity Framework Migration `AddSupportTicketSoftDeletes` will be created to alter the `SupportTickets` table.
+
+---
+
+### Backend API (Controllers & DTOs)
+
+#### [MODIFY] `R3AIA\DTOs\TicketDtos.cs`
+- Expose the `IsDeletedByUser` boolean in `TicketSummaryDto` so the frontend knows if a user deleted it.
+
+#### [MODIFY] `R3AIA\Controllers\TicketsController.cs`
+- **`GetMyTickets()` (User view):** Add filter `.Where(t => !t.IsDeletedByUser)`.
+- **`GetAllTickets()` (Admin view):** Add filter `.Where(t => !t.IsDeletedByAdmin)`.
+- **`GetTicket(int id)`:** Restrict fetching if the executing role has marked it as deleted locally (Return `NotFound`).
+- **`ReplyToTicket(int id)`:** Add block condition `if (ticket.IsDeletedByUser) return BadRequest(...)`.
+- **[NEW] `[HttpDelete("{id}")] DeleteTicket(int id)`:** 
+  - If the requester is **Admin**: `ticket.IsDeletedByAdmin = true;`
+  - If the requester is **User**: `ticket.IsDeletedByUser = true; ticket.Status = Closed;`
+
+---
+
+### Frontend UI
+
+#### [MODIFY] `front\components\dashboard\TicketSystem.jsx`
+- Add a Red `Trash` button in the Chat view header layout next to the back button.
+- Build a `handleDeleteTicket(id)` method connecting to the new `DELETE` API endpoint.
+- **Admin View Adjustment:** When `isAdmin && chatData.isDeletedByUser` is true:
+  - Conceal/Disable the chat input form.
+  - Render an aesthetically pleasing notification banner indicating: *"قام المستخدم بمسح التذكرة من سجلاته ولا يمكن الرد عليها."*
+
+## Open Questions
+
+- Should a ticket be completely hard-deleted from the database if *both* the User and the Admin eventually delete it? Keeping it softly deleted indefinitely might be better for preserving data logs long-term. Let me know if you prefer hard-deletion when both flags are true.
+
+## Verification Plan
+
+### Automated Tests
+- Run `dotnet ef migrations add` and `database update` to ensure the schema properly applies without conflict.
+
+### Manual Verification
+- Login as Patient, create a ticket, verify it's visible.
+- Click Delete as Patient. Verify it disappears from Patient's view.
+- Login as Admin. Verify the ticket is STILL in the admin's list, but when clicked, shows the "User deleted..." message and prevents replying.
+- Click Delete as Admin. Verify it completely vanishes from the Admin’s list.

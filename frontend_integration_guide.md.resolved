@@ -1,0 +1,97 @@
+# 📄 R3AIA API Frontend Integration Guide
+
+هذا الدليل مخصص لمطور الـ React (أو وكيل بناء الفرونت) لتنفيذ جميع واجهات النظام بناءً على الـ API الحالي، دون أي اجتهاد إضافي.
+
+## 📌 المعلومات الأساسية (Global)
+- **Base URL:** `http://localhost:5129`
+- **Auth:** تعمد جميع الطلبات (عدا Login/Register) على `Authorization: Bearer {token}` في الـ Headers.
+- **Roles:** النظام يعتمد 5 أدوار: [Patient](file:///f:/R3AIA%20GRADUTION/R3AIA%20PROJECT%20API/R3AIA/DTOs/MedicalDtos.cs#37-47), [Doctor](file:///f:/R3AIA%20GRADUTION/R3AIA%20PROJECT%20API/R3AIA/Controllers/MedicalRequestsController.cs#37-51), [Pharmacy](file:///f:/R3AIA%20GRADUTION/R3AIA%20PROJECT%20API/R3AIA/Models/Pharmacy.cs#7-32), [Volunteer](file:///f:/R3AIA%20GRADUTION/R3AIA%20PROJECT%20API/R3AIA/Models/Volunteer.cs#7-22), [Admin](file:///f:/R3AIA%20GRADUTION/R3AIA%20PROJECT%20API/R3AIA/Controllers/AdminController.cs#9-113).
+
+---
+
+## 🏗️ تدفق الصفحات (Page Flows) حسب الدور
+
+### 1️⃣ القواسم المشتركة (Common Pages)
+- **Login:** إدخال البريد الإلكتروني وكلمة المرور -> استلام الـ Token وتخزينه.
+- **Register:** تحديد الدور (Role) أولاً، ثم إدخال البيانات الأساسية.
+- **Profile Completion:** صفحة "إكمال البيانات" تظهر للمستخدم بعد أول عملية دخول إذا كان `HasCompletedProfile == false`. (كل دور له Form مختلف).
+- **Notifications:** جرس الإشعارات متاح للجميع لجلب التحديثات الحية.
+
+---
+
+### 2️⃣ لوحة المريض (Patient Dashboard)
+**الصفحات المتاحة:**
+1.  **Home:** عرض ملخص سريع (آخر الطلبات، الحالات الطارئة).
+2.  **Medical Consultations (الاستشارات الطبية):**
+    - **Page: Create Request:** فورم (الوصف + التخصص + رفع صور طبية اختيارية).
+    - **Page: My Requests:** عرض قائمة بطلباته. عند الضغط على طلب يظهر "رد الطبيب" (الموعد، الملاحظات) أو زر "إلغاء الطلب".
+3.  **Medicine Requests (طلبات الأدوية):**
+    - **Page: New Medicine Request:** رفع صورة الروشتة + تحديد خيار "توصيل للمنزل؟" (Checkbox).
+    - **Page: My Medicine Orders:** عرض حالة الطلب (قيد المراجعة، تم توفيره، جاري التوصيل). يظهر فيها تفاصيل الصيدلية بمجرد القبول.
+4.  **Donations (التبرعات):**
+    - **Page: Cases List:** عرض الحالات المحتاجة.
+    - **Page: Donate:** فورم الدفع (المبلغ + رفع صورة الإيصال).
+
+---
+
+### 3️⃣ لوحة الطبيب (Doctor Dashboard)
+**الصفحات المتاحة:**
+1.  **Open Consultations:** عرض الطلبات المتاحة في محافظته وتخصصه فقط.
+2.  **Consultation Detail:** عند الضغط على طلب -> عرض بيانات المريض بالكامل + الصور الطبية المرفقة.
+3.  **Response Page:** واجهة للرد (تحديد ميعاد الكشف + كتابة ملاحظات الطبيب).
+4.  **My Schedule:** رؤية المواعيد القادمة التي قبلها مع إمكانية "إلغاء الموعد".
+
+---
+
+### 4️⃣ لوحة الصيدلية (Pharmacy Dashboard)
+**الصفحات المتاحة:**
+1.  **Medicine Orders:** عرض قائمة بالروشتات المرفوعة في نفس المحافظة.
+2.  **Order Detail:** رؤية صورة الروشتة بوضوح لتحديد توفر الدواء.
+3.  **Accept Order:** زر "توفير الدواء" مع إمكانية إضافة ملاحظات (مثل السعر أو موعد الاستلام).
+
+---
+
+### 5️⃣ لوحة المتطوع (Volunteer Dashboard)
+**الصفحات المتاحة:**
+1.  **Delivery Tasks:** عرض مهام التوصيل المتاحة في محافظته (فقط الطلبات التي قبلتها الصيدلية واختار المريض توصيلها).
+2.  **Task Detail:** عرض عنوان الصيدلية (من أين سيأخذ الدواء) وعنوان المريض (أين سيسلمه) + أرقام الهواتف.
+3.  **Take Task:** زر "أخذ مهمة".
+4.  **Confirm Delivery:** زر "تأكيد التوصيل" بعد الوصول للمريض.
+
+---
+
+### 6️⃣ لوحة الأدمن (Admin Dashboard)
+**الصفحات المتاحة:**
+1.  **User Verification:** مراجعة بيانات المرضى الجدد وتوثيق حساباتهم (الحساب غير الموثق لا يطلب أدوية).
+2.  **Donation Management:** إنشاء حالات تبرع جديدة.
+3.  **Reports:** مراجعة بلاغات المستخدمين ضد بعضهم.
+4.  **System Monitoring:** عرض الطلبات المتأخرة (Stalled Requests) التي لم يرد عليها أحد لأكثر من ساعة.
+
+---
+
+## 🛠️ تفاصيل الـ API التقنية (للمبرمج)
+
+### Medicine Requests (Flow)
+- **POST** `/api/MedicineRequests` (FormData: `PrescriptionImage`, `NeedDelivery`)
+- **GET** `/api/MedicineRequests/open` (للصيدلية)
+- **POST** `/api/MedicineRequests/accept/{id}` (للصيدلية)
+- **GET** `/api/MedicineRequests/delivery-tasks` (للمتطوع)
+- **POST** `/api/MedicineRequests/take-delivery/{id}` (للمتطوع)
+- **POST** `/api/MedicineRequests/mark-delivered/{id}` (للمتطوع)
+
+### Medical Requests (Flow)
+- **POST** `/api/MedicalRequests/create` (FormData: `Description`, `SpecialtyId`, `MedicalImages[]`)
+- **GET** `/api/MedicalRequests/for-doctor` (للطبيب)
+- **GET** `/api/MedicalRequests/detail/{id}` (للطبيب)
+- **POST** `/api/MedicalRequests/respond/{id}` (للطبيب: `appointmentDate`, `doctorNotes`)
+- **POST** `/api/MedicalRequests/cancel/{id}` (للمريض أو الطبيب)
+
+---
+
+## ⚠️ ملاحظات هامة للفرونت
+1. **Validation:** يجب التأكد من عدم ترك الحقول فارغة قبل الإرسال.
+2. **Success/Error Messages:** النظام يرجع رسائل واضحة في الـ `Body` (مثل `message: "Request accepted successfully"`) يجب عرضها للمستخدم في Toasts.
+3. **Empty States:** عند عدم وجود طلبات، يجب عرض رسالة "لا توجد طلبات متاحة حالياً في محافظتك".
+4. **Images:** مسار الصور يرجع كـ URL كامل أو مسار نسبي، يجب التعامل معه في الـ `img src`.
+
+**هذا التوثيق كافٍ لبناء واجهة متكاملة تتطابق 100% مع منطق السيرفر.**

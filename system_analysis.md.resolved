@@ -1,0 +1,399 @@
+# 📊 تقرير فحص نظام R3AIA API
+
+## 📋 نظرة عامة
+
+**R3AIA** هو نظام API شامل لإدارة الرعاية الصحية يربط بين المرضى والأطباء والصيدليات والمتطوعين، مع نظام إدارة للتبرعات والطلبات الطبية.
+
+---
+
+## 🏗️ البنية المعمارية
+
+### التقنيات المستخدمة
+
+| المكون | التقنية | الإصدار |
+|--------|---------|---------|
+| **Framework** | ASP.NET Core Web API | .NET 9.0 |
+| **قاعدة البيانات** | SQL Server | - |
+| **ORM** | Entity Framework Core | 9.0.0 |
+| **المصادقة** | JWT Bearer + ASP.NET Identity | 9.0.0 |
+| **Mapping** | AutoMapper | 12.0.1 |
+| **API Documentation** | Swagger/OpenAPI | 9.0.8 |
+
+### الحزم الرئيسية
+
+```xml
+- Microsoft.AspNetCore.Identity.EntityFrameworkCore (9.0.0)
+- Microsoft.AspNetCore.Authentication.JwtBearer (9.0.0)
+- Microsoft.EntityFrameworkCore.SqlServer (9.0.0)
+- AutoMapper.Extensions.Microsoft.DependencyInjection (12.0.1)
+- Swashbuckle.AspNetCore (6.5.0)
+```
+
+---
+
+## 🗄️ قاعدة البيانات
+
+### سلسلة الاتصال
+
+```
+Server: YOUSSEF-SHENDY\MSSQLSERVER09
+Database: R3AIA
+Authentication: Integrated Security
+```
+
+### الكيانات الرئيسية (Models)
+
+#### 1. **ApplicationUser** (المستخدم الأساسي)
+يرث من `IdentityUser` ويحتوي على:
+- `FullName`: الاسم الكامل
+- `UserType`: نوع المستخدم (Admin, Doctor, Pharmacist, Patient, Volunteer)
+- `NationalID`: الرقم القومي (فريد)
+- `IsActive`: حالة النشاط
+- `AccountStatus`: حالة الحساب (Active, Pending, Banned)
+- `HasCompletedProfile`: هل أكمل البروفايل
+- `IsVerified`: هل تم التحقق من الحساب (للأطباء والصيدليات)
+
+#### 2. **Patient** (المريض)
+- `NationalID` (فريد)
+- `DateOfBirth`, `Gender`, `Address`
+- `GovernorateId`, `CityId`
+- `MedicalHistory`, `EmergencyContact`
+
+#### 3. **Doctor** (الطبيب)
+- `NationalID`, `LicenseNumber`
+- `SpecialtyId`, `GovernorateId`, `CityId`
+- `ClinicAddress`, `WorkingHours`
+- `LicenseImageUrl`, `IdImageUrl`
+
+#### 4. **Pharmacy** (الصيدلية)
+- `PharmacyName`, `LicenseNumber`
+- `GovernorateId`, `CityId`, `Address`
+- `LicenseImageUrl`, `IdImageUrl`
+
+#### 5. **Volunteer** (المتطوع)
+- `NationalID` (فريد)
+- `GovernorateId`, `CityId`
+- `IdImageUrl`, `IsAvailable`
+
+#### 6. **MedicalRequest** (طلب استشارة طبية)
+- `PatientId`, `DoctorId`
+- `Symptoms`, `Status`
+- `Diagnosis`, `Prescription`
+
+#### 7. **MedicineRequest** (طلب دواء)
+- `PatientId`, `PharmacyId`
+- `PrescriptionImageUrl`, `MedicineName`
+- `Status`
+
+#### 8. **DeliveryTask** (مهمة توصيل)
+- `MedicineRequestId`, `VolunteerId`
+- `Status` (Available, Taken, Delivered)
+
+#### 9. **DonationCase** (حالة تبرع)
+- `Title`, `Description`
+- `TargetAmount`, `CurrentAmount`
+- `CaseImageUrl`
+
+#### 10. **Donation** (تبرع)
+- `DonationCaseId`, `DonorId`
+- `Amount`, `Status`
+
+#### 11. **UserReport** (بلاغ)
+- `ReporterId`, `ReportedUserId`
+- `Reason`, `IsResolved`
+
+#### 12. **Notification** (إشعار)
+- `UserId`, `Message`
+- `IsRead`
+
+### العلاقات المهمة
+
+```mermaid
+graph TD
+    A[ApplicationUser] -->|OneToMany| B[Patient]
+    A -->|OneToMany| C[Doctor]
+    A -->|OneToMany| D[Pharmacy]
+    A -->|OneToMany| E[Volunteer]
+    
+    B -->|OneToMany| F[MedicalRequest]
+    C -->|OneToMany| F
+    
+    B -->|OneToMany| G[MedicineRequest]
+    D -->|OneToMany| G
+    
+    G -->|OneToOne| H[DeliveryTask]
+    E -->|OneToMany| H
+    
+    I[DonationCase] -->|OneToMany| J[Donation]
+    A -->|OneToMany| J
+    
+    K[Governorate] -->|OneToMany| L[City]
+    K -->|OneToMany| B
+    K -->|OneToMany| C
+    K -->|OneToMany| D
+```
+
+---
+
+## 🔐 نظام المصادقة والتفويض
+
+### JWT Configuration
+
+```json
+{
+  "Key": "SUPER_SECRET_R3AIA_JWT_KEY_CHANGE_ME",
+  "Issuer": "R3AIA.Api",
+  "Audience": "R3AIA.Clients",
+  "DurationInMinutes": 60
+}
+```
+
+> [!WARNING]
+> **مفتاح JWT الحالي ضعيف ويجب تغييره في بيئة الإنتاج!**
+
+### الأدوار (Roles)
+
+1. **Admin**: إدارة كاملة للنظام
+2. **Doctor**: الأطباء
+3. **Pharmacist**: الصيادلة
+4. **Patient**: المرضى
+5. **Volunteer**: المتطوعون
+
+### آلية المصادقة
+
+- تسجيل الدخول يتم عبر [AuthController](file:///f:/R3AIA%20GRADUTION/R3AIA%20PROJECT%20API/R3AIA/Controllers/AuthController.cs)
+- يتم منع تسجيل الدخول للحسابات المحظورة (`AccountStatus.Banned`)
+- يتم منع التسجيل بالرقم القومي المحظور مسبقاً
+- الحسابات الجديدة تبدأ بحالة [Pending](file:///f:/R3AIA%20GRADUTION/R3AIA%20PROJECT%20API/R3AIA/Controllers/AdminController.cs#23-29) وتحتاج موافقة الأدمن
+
+---
+
+## 🎯 الوظائف الرئيسية
+
+### 1. إدارة المستخدمين (Admin)
+
+**Controller**: [AdminController.cs](file:///f:/R3AIA%20GRADUTION/R3AIA%20PROJECT%20API/R3AIA/Controllers/AdminController.cs)
+
+| Endpoint | الوظيفة |
+|----------|---------|
+| `GET /api/admin/pending-users` | عرض المستخدمين المنتظرين للموافقة |
+| `POST /api/admin/verify-user` | الموافقة على مستخدم |
+| `POST /api/admin/create-case` | إنشاء حالة تبرع جديدة |
+| `GET /api/admin/all-reports` | عرض جميع البلاغات |
+| `PUT /api/admin/resolve-report` | حل بلاغ |
+| `GET /api/admin/stalled-requests` | عرض الطلبات المتعثرة |
+| `GET /api/admin/request-detail` | تفاصيل طلب محدد |
+| `POST /api/admin/ban-user/{userId}` | حظر مستخدم |
+| `POST /api/admin/unban-user/{userId}` | فك حظر مستخدم |
+
+### 2. المصادقة (Authentication)
+
+**Controller**: [AuthController.cs](file:///f:/R3AIA%20GRADUTION/R3AIA%20PROJECT%20API/R3AIA/Controllers/AuthController.cs)
+
+| Endpoint | الوظيفة |
+|----------|---------|
+| `POST /api/auth/register` | تسجيل مستخدم جديد |
+| `POST /api/auth/login` | تسجيل الدخول |
+
+### 3. Controllers الأخرى
+
+| Controller | الوظيفة |
+|-----------|---------|
+| [CitiesController](file:///f:/R3AIA%20GRADUTION/R3AIA%20PROJECT%20API/R3AIA/Controllers/CitiesController.cs) | إدارة المدن والمحافظات |
+| [DeliveryController](file:///f:/R3AIA%20GRADUTION/R3AIA%20PROJECT%20API/R3AIA/Controllers/DeliveryController.cs) | إدارة مهام التوصيل |
+| [DonationsController](file:///f:/R3AIA%20GRADUTION/R3AIA%20PROJECT%20API/R3AIA/Controllers/DonationsController.cs) | إدارة التبرعات |
+| [MedicalRequestsController](file:///f:/R3AIA%20GRADUTION/R3AIA%20PROJECT%20API/R3AIA/Controllers/MedicalRequestsController.cs) | إدارة الطلبات الطبية |
+| [MedicineRequestsController](file:///f:/R3AIA%20GRADUTION/R3AIA%20PROJECT%20API/R3AIA/Controllers/MedicineRequestsController.cs) | إدارة طلبات الأدوية |
+| [ProfilesController](file:///f:/R3AIA%20GRADUTION/R3AIA%20PROJECT%20API/R3AIA/Controllers/ProfilesController.cs) | إدارة الملفات الشخصية |
+| [SupportController](file:///f:/R3AIA%20GRADUTION/R3AIA%20PROJECT%20API/R3AIA/Controllers/SupportController.cs) | الدعم الفني والبلاغات |
+
+---
+
+## 🔧 الخدمات (Services)
+
+### 1. **JwtService**
+- توليد JWT Tokens
+- تضمين Claims (UserId, Email, Roles)
+
+### 2. **FileService**
+- حفظ الصور والملفات
+- إدارة المجلدات (`wwwroot/Uploads`)
+
+---
+
+## 📦 الـ Repositories
+
+| Repository | الوظيفة |
+|-----------|---------|
+| [IAccountRepository](file:///f:/R3AIA%20GRADUTION/R3AIA%20PROJECT%20API/R3AIA/Repositories/IAccountRepository.cs#10-15) | تسجيل الدخول والتسجيل |
+| [IAdminRepository](file:///f:/R3AIA%20GRADUTION/R3AIA%20PROJECT%20API/R3AIA/Repositories/IAdminRepository.cs#9-22) | وظائف الإدارة |
+| `IDeliveryRepository` | إدارة التوصيل |
+| `IDonationRepository` | إدارة التبرعات |
+| `IMedicalRequestRepository` | إدارة الطلبات الطبية |
+| `IMedicineRepository` | إدارة طلبات الأدوية |
+| `ISupportRepository` | الدعم والبلاغات |
+
+---
+
+## 🔄 دورة حياة الطلبات
+
+### طلب استشارة طبية (Medical Request)
+
+```mermaid
+graph LR
+    A[Patient يرسل طلب] --> B[Pending]
+    B --> C[Doctor يقبل]
+    C --> D[Accepted]
+    D --> E[Doctor يكتب التشخيص]
+    E --> F[Completed]
+    B --> G[Cancelled]
+```
+
+### طلب دواء (Medicine Request)
+
+```mermaid
+graph LR
+    A[Patient يرسل وصفة] --> B[Pending]
+    B --> C[Pharmacy تقبل]
+    C --> D[Accepted]
+    D --> E[Volunteer يأخذ المهمة]
+    E --> F[Delivered]
+    B --> G[Cancelled]
+```
+
+---
+
+## ⚙️ الإعدادات (Configuration)
+
+### CORS Policy
+
+```csharp
+AllowAnyOrigin()
+AllowAnyMethod()
+AllowAnyHeader()
+```
+
+> [!CAUTION]
+> **سياسة CORS الحالية تسمح بالوصول من أي مصدر - يجب تقييدها في الإنتاج!**
+
+### Static Files
+
+- المسار: `wwwroot/`
+- يتم حفظ الصور المرفوعة في `wwwroot/Uploads/`
+
+### Identity Options
+
+- استخدام الإعدادات الافتراضية
+- Token Providers مفعلة
+
+---
+
+## 📊 حالات النظام (Enums)
+
+```csharp
+// أنواع المستخدمين
+UserType: Admin, Doctor, Pharmacist, Patient, Volunteer
+
+// حالات الحساب
+AccountStatus: Active, Pending, Banned
+
+// حالات الطلبات
+RequestStatus: Pending, Accepted, Completed, Cancelled, Fulfilled
+
+// حالات التوصيل
+DeliveryStatus: Available, Taken, Delivered
+
+// حالات التبرعات
+DonationStatus: Pending, Approved, Rejected
+```
+
+---
+
+## 🔍 نقاط القوة
+
+✅ **بنية واضحة ومنظمة**: استخدام Repository Pattern و Dependency Injection  
+✅ **أمان قوي**: JWT + Identity + Role-based Authorization  
+✅ **قابلية التوسع**: استخدام Interfaces وفصل المسؤوليات  
+✅ **توثيق API**: Swagger/OpenAPI مدمج  
+✅ **AutoMapper**: تحويل تلقائي بين DTOs والـ Models  
+✅ **Migrations**: إدارة قاعدة البيانات بشكل احترافي  
+
+---
+
+## ⚠️ نقاط تحتاج تحسين
+
+### 🔴 أمان عالي الأولوية
+
+1. **مفتاح JWT ضعيف**: يجب استخدام مفتاح أقوى وتخزينه في Environment Variables
+2. **CORS مفتوح بالكامل**: يجب تقييد Origins المسموحة
+3. **Connection String في appsettings.json**: يجب نقله إلى User Secrets أو Environment Variables
+
+### 🟡 تحسينات مقترحة
+
+1. **Logging**: إضافة نظام Logging شامل (Serilog مثلاً)
+2. **Error Handling**: إضافة Global Exception Handler
+3. **Validation**: تحسين Validation للـ DTOs
+4. **Rate Limiting**: إضافة حماية ضد الطلبات المتكررة
+5. **Caching**: إضافة Caching للبيانات الثابتة (المحافظات، التخصصات)
+6. **Health Checks**: إضافة endpoints لفحص صحة النظام
+7. **API Versioning**: إضافة نظام إصدارات للـ API
+
+### 🟢 تحسينات اختيارية
+
+1. **SignalR**: للإشعارات الفورية
+2. **Background Jobs**: لمعالجة المهام الطويلة (Hangfire مثلاً)
+3. **Email Service**: لإرسال رسائل التحقق والإشعارات
+4. **SMS Service**: لإرسال OTP والإشعارات المهمة
+
+---
+
+## 📝 ملاحظات إضافية
+
+### Seeding
+
+يتم تشغيل `SeedAsync()` عند بدء التطبيق لإنشاء:
+- الأدوار الأساسية
+- حساب Admin افتراضي
+
+### Migrations
+
+يوجد 11 Migration في المشروع، مما يدل على تطور تدريجي لقاعدة البيانات.
+
+### DTOs
+
+يوجد 12 ملف DTOs منظمة حسب الوظيفة:
+- `AuthDtos`: للمصادقة
+- `ProfileDtos`: للملفات الشخصية
+- `AdminDtos`: لوظائف الإدارة
+- وغيرها...
+
+---
+
+## 🎯 التوصيات النهائية
+
+### للبيئة التطويرية (Development)
+1. ✅ النظام جاهز للاستخدام
+2. تأكد من تشغيل SQL Server
+3. قم بتشغيل Migrations: `dotnet ef database update`
+
+### للبيئة الإنتاجية (Production)
+1. 🔐 **غيّر مفتاح JWT فوراً**
+2. 🔐 **قيّد CORS Policy**
+3. 🔐 **انقل Connection String إلى Environment Variables**
+4. 📊 **أضف Logging شامل**
+5. 🛡️ **أضف Rate Limiting**
+6. 🔍 **أضف Health Checks**
+7. 📧 **أضف Email/SMS Services**
+
+---
+
+## 📞 معلومات التواصل
+
+**Database Server**: `YOUSSEF-SHENDY\MSSQLSERVER09`  
+**API Base URL**: `https://localhost:{port}/api`  
+**Swagger UI**: `https://localhost:{port}/swagger`
+
+---
+
+> [!NOTE]
+> هذا التقرير تم إنشاؤه بناءً على فحص شامل للكود المصدري في **2026-02-06**
